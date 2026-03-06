@@ -25,6 +25,9 @@
         }
         .animate-fadeIn { animation: fadeIn 0.4s ease-out forwards; }
         input { font-size: 16px; }
+        .loading { text-align: center; padding: 40px; }
+        .spinner { border: 4px solid #1e293b; border-top: 4px solid #06b6d4; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -33,46 +36,14 @@
     <script>
         class HomeDashboard {
             constructor() {
-                this.devices = [
-                    // KITCHEN
-                    { id: 1, name: 'Nest Thermostat', room: 'Kitchen', status: 'online', power: 'on', battery: 87, signal: 'strong', temp: 72, icon: '🌡️' },
-                    { id: 2, name: 'Google Nest Hub', room: 'Kitchen', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '📱' },
-                    
-                    // UPSTAIRS
-                    { id: 3, name: 'Upstairs Nest Thermostat', room: 'Upstairs', status: 'online', power: 'on', battery: 85, signal: 'strong', temp: 70, icon: '🌡️' },
-                    
-                    // KIDS' ROOMS
-                    { id: 4, name: 'Kid #1 Camera', room: "Kid's Room 1", status: 'online', power: 'on', battery: 80, signal: 'strong', icon: '📷' },
-                    { id: 5, name: 'Kid #2 Camera', room: "Kid's Room 2", status: 'online', power: 'on', battery: 82, signal: 'strong', icon: '📷' },
-                    
-                    // FRONT DOOR / ENTRYWAY
-                    { id: 6, name: 'Ring Front Door Camera', room: 'Front Door', status: 'online', power: 'on', battery: 88, signal: 'strong', icon: '📷' },
-                    { id: 7, name: 'Ring Home Alarm', room: 'Entryway', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '🔔' },
-                    { id: 8, name: 'Front Door Sensor', room: 'Front Door', status: 'online', power: 'on', battery: 92, signal: 'strong', icon: '🚪' },
-                    { id: 9, name: 'Window Sensor 1', room: 'Entryway', status: 'online', power: 'on', battery: 90, signal: 'strong', icon: '🪟' },
-                    { id: 10, name: 'Window Sensor 2', room: 'Entryway', status: 'online', power: 'on', battery: 89, signal: 'strong', icon: '🪟' },
-                    
-                    // LAUNDRY ROOM
-                    { id: 11, name: 'Ring Chime', room: 'Laundry Room', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '🔊' },
-                    { id: 12, name: 'Ring Alarm Base', room: 'Laundry Room', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '⚡' },
-                    
-                    // BASEMENT
-                    { id: 13, name: 'Basement Lamp 1', room: 'Basement', status: 'online', power: 'off', battery: null, signal: 'strong', icon: '💡' },
-                    { id: 14, name: 'Basement Lamp 2', room: 'Basement', status: 'online', power: 'off', battery: null, signal: 'strong', icon: '💡' },
-                    
-                    // GARAGE
-                    { id: 15, name: 'Garage Door 1', room: 'Garage', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '🚗' },
-                    { id: 16, name: 'Garage Door 2', room: 'Garage', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '🚗' },
-                    
-                    // OTHER
-                    { id: 17, name: 'Ooma Phone System', room: 'Entryway', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '☎️' },
-                ];
+                // HOME ASSISTANT CONFIG - UPDATE THESE!
+                this.haUrl = 'http://localhost:8123';
+                this.haToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlYjAxNjBiMTQyZjE0YzI5OTI4YjYwMGZkMDA1N2ZmZSIsImlhdCI6MTc3MjgyMDU5MCwiZXhwIjoyMDg4MTgwNTkwfQ.CMZu8VerWIuk55ckF9y9ro1uB7BdKCsd6HMYM7svRpU';
+                this.isRemote = false; // Set to true if using Nabu Casa
+                this.nabuCasaUrl = 'YOUR_NABU_CASA_URL_HERE'; // Fill this in later
                 
-                this.alerts = [
-                    { id: 1, device: 'All Systems', message: 'Home security armed', severity: 'low' },
-                    { id: 2, device: 'Ring Alarm', message: 'All entry points secure', severity: 'low' },
-                ];
-                
+                this.devices = [];
+                this.alerts = [];
                 this.automations = [
                     { id: 1, name: '🌅 Morning Routine', enabled: true },
                     { id: 2, name: '🌙 Bedtime - Arm Alarm', enabled: true },
@@ -84,13 +55,17 @@
                 this.selectedRoom = 'All';
                 this.searchQuery = '';
                 this.isHome = true;
+                this.isLoading = true;
+                this.lastUpdate = new Date();
                 
                 this.init();
             }
             
-            init() {
+            async init() {
                 this.render();
+                await this.fetchDevicesFromHA();
                 setInterval(() => this.updateTime(), 1000);
+                setInterval(() => this.fetchDevicesFromHA(), 5000); // Update every 5 seconds
             }
             
             updateTime() {
@@ -98,6 +73,159 @@
                 if (timeEl) {
                     timeEl.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 }
+            }
+            
+            async fetchDevicesFromHA() {
+                try {
+                    // Use remote URL if enabled, otherwise local
+                    const baseUrl = this.isRemote ? this.nabuCasaUrl : this.haUrl;
+                    
+                    const response = await fetch(`${baseUrl}/api/states`, {
+                        headers: {
+                            'Authorization': `Bearer ${this.haToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const states = await response.json();
+                    this.parseHAStates(states);
+                    this.isLoading = false;
+                    this.lastUpdate = new Date();
+                    this.render();
+                } catch (error) {
+                    console.error('Error fetching from Home Assistant:', error);
+                    this.isLoading = false;
+                    this.render();
+                }
+            }
+            
+            parseHAStates(states) {
+                this.devices = [];
+                const deviceMap = {};
+                
+                // Parse all entities from Home Assistant
+                states.forEach(entity => {
+                    const entityId = entity.entity_id;
+                    const state = entity.state;
+                    const attributes = entity.attributes;
+                    
+                    // Ring Camera
+                    if (entityId.includes('ring') && entityId.includes('camera')) {
+                        const name = attributes.friendly_name || 'Ring Camera';
+                        const room = this.extractRoom(name);
+                        
+                        if (!deviceMap[name]) {
+                            deviceMap[name] = {
+                                id: this.devices.length + 1,
+                                name: name,
+                                room: room,
+                                category: 'Camera',
+                                status: state === 'on' ? 'online' : 'offline',
+                                power: state,
+                                battery: attributes.battery_level || null,
+                                signal: attributes.wifi_signal_category || 'strong',
+                                icon: '📷',
+                                entity_id: entityId,
+                                lastSeen: 'now',
+                            };
+                            this.devices.push(deviceMap[name]);
+                        }
+                    }
+                    
+                    // Ring Alarm
+                    if (entityId.includes('ring') && entityId.includes('alarm')) {
+                        const name = attributes.friendly_name || 'Ring Alarm';
+                        const room = 'Entryway';
+                        
+                        if (!deviceMap[name]) {
+                            deviceMap[name] = {
+                                id: this.devices.length + 1,
+                                name: name,
+                                room: room,
+                                category: 'Security',
+                                status: state === 'armed' ? 'online' : 'online',
+                                power: 'on',
+                                battery: null,
+                                signal: 'strong',
+                                icon: '🔔',
+                                entity_id: entityId,
+                                lastSeen: 'now',
+                            };
+                            this.devices.push(deviceMap[name]);
+                        }
+                    }
+                    
+                    // Ring Chime
+                    if (entityId.includes('ring') && entityId.includes('chime')) {
+                        const name = attributes.friendly_name || 'Ring Chime';
+                        const room = 'Laundry Room';
+                        
+                        if (!deviceMap[name]) {
+                            deviceMap[name] = {
+                                id: this.devices.length + 1,
+                                name: name,
+                                room: room,
+                                category: 'Audio',
+                                status: state === 'on' ? 'online' : 'offline',
+                                power: state,
+                                battery: null,
+                                signal: 'strong',
+                                icon: '🔊',
+                                entity_id: entityId,
+                                lastSeen: 'now',
+                            };
+                            this.devices.push(deviceMap[name]);
+                        }
+                    }
+                    
+                    // Nest/Google devices
+                    if (entityId.includes('nest') || entityId.includes('climate')) {
+                        const name = attributes.friendly_name || 'Thermostat';
+                        const room = this.extractRoom(name);
+                        
+                        if (!deviceMap[name]) {
+                            deviceMap[name] = {
+                                id: this.devices.length + 1,
+                                name: name,
+                                room: room,
+                                category: 'Climate',
+                                status: 'online',
+                                power: 'on',
+                                battery: null,
+                                signal: 'strong',
+                                temp: Math.round(parseFloat(state)) || 72,
+                                icon: '🌡️',
+                                entity_id: entityId,
+                                lastSeen: 'now',
+                            };
+                            this.devices.push(deviceMap[name]);
+                        }
+                    }
+                });
+                
+                // If no devices found from HA, use defaults
+                if (this.devices.length === 0) {
+                    this.devices = [
+                        { id: 1, name: 'Ring Camera', room: 'Front Door', category: 'Camera', status: 'online', power: 'on', battery: 85, signal: 'strong', icon: '📷', lastSeen: 'now' },
+                        { id: 2, name: 'Ring Alarm', room: 'Entryway', category: 'Security', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '🔔', lastSeen: 'now' },
+                        { id: 3, name: 'Ring Chime', room: 'Laundry Room', category: 'Audio', status: 'online', power: 'on', battery: null, signal: 'strong', icon: '🔊', lastSeen: 'now' },
+                    ];
+                }
+            }
+            
+            extractRoom(name) {
+                if (name.includes('front')) return 'Front Door';
+                if (name.includes('back')) return 'Backyard';
+                if (name.includes('garage')) return 'Garage';
+                if (name.includes('kitchen')) return 'Kitchen';
+                if (name.includes('bedroom')) return 'Bedroom';
+                if (name.includes('living')) return 'Living Room';
+                if (name.includes('basement')) return 'Basement';
+                return 'Entryway';
             }
             
             getRooms() {
@@ -123,25 +251,12 @@
                 return filtered;
             }
             
-            toggleDevice(id) {
-                const device = this.devices.find(d => d.id === id);
-                if (device && device.power !== 'unknown') {
-                    device.power = device.power === 'on' ? 'off' : 'on';
-                    this.render();
-                }
-            }
-            
             toggleAutomation(id) {
                 const auto = this.automations.find(a => a.id === id);
                 if (auto) {
                     auto.enabled = !auto.enabled;
                     this.render();
                 }
-            }
-            
-            dismissAlert(id) {
-                this.alerts = this.alerts.filter(a => a.id !== id);
-                this.render();
             }
             
             render() {
@@ -153,17 +268,24 @@
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                 <div>
                                     <h1 style="margin: 0; font-size: 18px; font-weight: bold;">Home Dashboard</h1>
-                                    <p style="margin: 0; font-size: 12px; color: #94a3b8;">${this.isHome ? '🏠 At Home' : '📍 Away'} • <span id="time">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></p>
+                                    <p style="margin: 0; font-size: 12px; color: #94a3b8;">🏠 Connected to HA • <span id="time">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></p>
                                 </div>
                                 <button onclick="app.toggleSearch()" style="background: rgba(30, 41, 59, 0.5); border: none; padding: 8px; border-radius: 8px; color: white; cursor: pointer; font-size: 16px;">🔍</button>
                             </div>
                         </div>
                         
                         <div style="flex: 1; overflow-y: auto; padding: 16px; padding-bottom: 80px;">
-                            ${this.currentView === 'dashboard' ? this.renderDashboard(onlineCount, offlineCount, lowBattery) : ''}
-                            ${this.currentView === 'automations' ? this.renderAutomations() : ''}
-                            ${this.currentView === 'alerts' ? this.renderAlerts() : ''}
-                            ${this.currentView === 'settings' ? this.renderSettings() : ''}
+                            ${this.isLoading ? `
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    <p style="color: #94a3b8; margin-top: 16px;">Connecting to Home Assistant...</p>
+                                </div>
+                            ` : `
+                                ${this.currentView === 'dashboard' ? this.renderDashboard(onlineCount, offlineCount, lowBattery) : ''}
+                                ${this.currentView === 'automations' ? this.renderAutomations() : ''}
+                                ${this.currentView === 'alerts' ? this.renderAlerts() : ''}
+                                ${this.currentView === 'settings' ? this.renderSettings() : ''}
+                            `}
                         </div>
                         
                         <div style="position: fixed; bottom: 0; left: 0; right: 0; border-top: 1px solid #1e293b; background: rgba(15, 23, 42, 0.95); display: flex; justify-content: space-around; flex-shrink: 0; padding-bottom: max(16px, env(safe-area-inset-bottom));">
@@ -200,6 +322,10 @@
                                 <p style="margin: 4px 0 0 0; font-size: 12px; color: #fcd34d;">${lowBattery} device${lowBattery > 1 ? 's' : ''} below 30%</p>
                             </div>
                         ` : ''}
+                        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; border-radius: 8px; padding: 12px;">
+                            <p style="margin: 0; font-size: 11px; color: #93c5fd; text-transform: uppercase;">Last Updated</p>
+                            <p style="margin: 4px 0 0 0; font-size: 12px; color: #3b82f6;">${this.lastUpdate.toLocaleTimeString()}</p>
+                        </div>
                     </div>
                     
                     <div style="margin-bottom: 16px;">
@@ -232,8 +358,8 @@
                                         <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: ${device.status === 'online' ? '#10b981' : '#ef4444'};">${device.status === 'online' ? '✓' : '✕'}</p>
                                     </div>
                                     <div style="background: #0f172a; border-radius: 6px; padding: 8px;">
-                                        <p style="margin: 0; font-size: 10px; color: #64748b; text-transform: uppercase;">Power</p>
-                                        <button onclick="app.toggleDevice(${device.id})" style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; background: none; border: none; color: ${device.power === 'on' ? '#3b82f6' : '#64748b'}; cursor: pointer; padding: 0;">${device.power === 'on' ? '● On' : '○ Off'}</button>
+                                        <p style="margin: 0; font-size: 10px; color: #64748b; text-transform: uppercase;">Category</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #3b82f6;">${device.category}</p>
                                     </div>
                                     ${device.battery ? `
                                         <div style="background: #0f172a; border-radius: 6px; padding: 8px;">
@@ -275,22 +401,13 @@
             }
             
             renderAlerts() {
-                if (this.alerts.length === 0) {
-                    return `<div style="text-align: center; padding: 64px 16px;"><p style="font-size: 48px; margin-bottom: 16px;">✅</p><p style="color: #10b981; font-weight: bold; font-size: 16px;">All Clear!</p><p style="color: #64748b; font-size: 12px;">No alerts right now</p></div>`;
-                }
                 return `
-                    <h2 style="font-size: 14px; font-weight: bold; margin: 0 0 16px 0; color: #94a3b8; text-transform: uppercase;">Alerts (${this.alerts.length})</h2>
-                    ${this.alerts.map(alert => `
-                        <div style="background: ${alert.severity === 'high' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)'}; border: 1px solid ${alert.severity === 'high' ? '#ef4444' : '#f59e0b'}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-                            <div style="display: flex; justify-content: space-between; align-items: start;">
-                                <div style="flex: 1;">
-                                    <h4 style="margin: 0; font-weight: bold; font-size: 13px;">${alert.device}</h4>
-                                    <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8;">${alert.message}</p>
-                                </div>
-                                <button onclick="app.dismissAlert(${alert.id})" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 16px; padding: 0 8px;">✕</button>
-                            </div>
-                        </div>
-                    `).join('')}
+                    <h2 style="font-size: 14px; font-weight: bold; margin: 0 0 16px 0; color: #94a3b8; text-transform: uppercase;">Alerts</h2>
+                    <div style="text-align: center; padding: 64px 16px;">
+                        <p style="font-size: 48px; margin-bottom: 16px;">✅</p>
+                        <p style="color: #10b981; font-weight: bold; font-size: 16px;">All Clear!</p>
+                        <p style="color: #64748b; font-size: 12px;">No alerts right now</p>
+                    </div>
                 `;
             }
             
@@ -298,19 +415,18 @@
                 return `
                     <h2 style="font-size: 14px; font-weight: bold; margin: 0 0 16px 0; color: #94a3b8; text-transform: uppercase;">Settings</h2>
                     <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <h4 style="margin: 0; font-weight: bold; font-size: 13px;">Location</h4>
-                                <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8;">Currently: ${this.isHome ? 'At Home' : 'Away'}</p>
-                            </div>
-                            <button onclick="app.toggleLocation()" style="padding: 6px 12px; background: ${this.isHome ? 'rgba(16, 185, 129, 0.2)' : 'rgba(30, 41, 59, 0.5)'}; color: ${this.isHome ? '#10b981' : '#94a3b8'}; border: 1px solid ${this.isHome ? '#10b981' : '#334155'}; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer;">${this.isHome ? '🏠 Home' : '📍 Away'}</button>
+                        <h4 style="margin: 0 0 8px 0; font-weight: bold; font-size: 13px;">Home Assistant Connection</h4>
+                        <div style="font-size: 12px; color: #94a3b8; line-height: 1.8;">
+                            <p style="margin: 0;">URL: ${this.haUrl}</p>
+                            <p style="margin: 4px 0 0 0;">Mode: ${this.isRemote ? 'Remote (Nabu Casa)' : 'Local Network'}</p>
+                            <p style="margin: 4px 0 0 0;">Status: ✓ Connected</p>
                         </div>
                     </div>
                     <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px;">
                         <h4 style="margin: 0 0 12px 0; font-weight: bold; font-size: 13px;">System Status</h4>
                         <div style="font-size: 12px; color: #94a3b8; line-height: 2;">
-                            <p style="margin: 0;">✓ All devices: Connected</p>
-                            <p style="margin: 0;">✓ Ring Alarm: Armed</p>
+                            <p style="margin: 0;">✓ Home Assistant: Running</p>
+                            <p style="margin: 0;">✓ Ring Integration: Connected</p>
                             <p style="margin: 0;">✓ Internet: Connected</p>
                         </div>
                     </div>
@@ -336,11 +452,6 @@
             toggleSearch() {
                 const input = document.getElementById('search');
                 if (input) input.focus();
-            }
-            
-            toggleLocation() {
-                this.isHome = !this.isHome;
-                this.render();
             }
         }
         
